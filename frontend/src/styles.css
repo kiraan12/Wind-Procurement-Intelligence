@@ -103,6 +103,24 @@ body {
   cursor: not-allowed;
 }
 
+.btn-theme {
+  background: var(--bg-elev-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-theme:hover {
+  background: var(--accent);
+  color: var(--bg);
+  border-color: var(--accent);
+}
+
 .kpis {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
@@ -139,6 +157,20 @@ body {
   margin-top: 2px;
   color: var(--muted);
   font-size: 0.65rem;
+}
+
+.kpi-alert {
+  border: 2px solid var(--danger) !important;
+  animation: pulse-alert 2s infinite;
+}
+
+@keyframes pulse-alert {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(196, 92, 92, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(196, 92, 92, 0);
+  }
 }
 
 .panel {
@@ -383,6 +415,31 @@ tbody tr.worst {
   color: var(--negative);
 }
 
+.threshold-control {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 12px;
+}
+
+.threshold-control label {
+  color: var(--muted);
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.threshold-control input {
+  background: var(--bg-elev);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 1rem;
+  width: 100px;
+}
+
 .skeleton-grid {
   display: flex;
   flex-direction: column;
@@ -455,4 +512,51 @@ tbody tr.worst {
   .app {
     padding: 16px 12px 32px;
   }
+}
+
+/* Light mode theme */
+body.light-mode {
+  --bg: #f5f7fa;
+  --bg-elev: #ffffff;
+  --bg-elev-2: #e8ecf1;
+  --line: #d1d9e6;
+  --text: #2d3748;
+  --muted: #718096;
+  --accent: #3182ce;
+  --actual: #d69e2e;
+  --forecast: #3182ce;
+  --band: rgba(49, 130, 206, 0.18);
+  --negative: #e53e3e;
+  --positive: #38a169;
+  --danger: #e53e3e;
+  --shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+body.light-mode {
+  background: radial-gradient(1200px 500px at 10% -10%, #e2e8f0 0%, var(--bg) 55%);
+}
+
+body.light-mode .day-picker select,
+body.light-mode .price-control input,
+body.light-mode .threshold-control input {
+  background: var(--bg-elev);
+  color: var(--text);
+  border: 1px solid var(--line);
+}
+
+body.light-mode .price-presets button {
+  background: var(--bg-elev);
+  color: var(--text);
+  border: 1px solid var(--line);
+}
+
+body.light-mode .price-presets button:hover {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
+body.light-mode tbody tr:hover,
+body.light-mode tbody tr.selected {
+  background: var(--bg-elev-2);
 }

@@ -79,6 +79,9 @@ export default function App() {
   const [meta, setMeta] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [darkMode, setDarkMode] = useState(true);
+  const [tableSort, setTableSort] = useState({ column: 'mae', direction: 'asc' });
+  const [alertThresholds, setAlertThresholds] = useState({ mae: 5000, bias: 3000 });
 
   // pricePerMwh is the committed value used for fetching;
   // priceInput is what the user is typing (debounced into pricePerMwh).
@@ -94,6 +97,17 @@ export default function App() {
     }, 400);
     return () => clearTimeout(timer);
   }, [priceInput]);
+
+  // Apply dark mode class to body
+  useEffect(() => {
+    if (darkMode) {
+      document.body.classList.add('dark-mode');
+      document.body.classList.remove('light-mode');
+    } else {
+      document.body.classList.add('light-mode');
+      document.body.classList.remove('dark-mode');
+    }
+  }, [darkMode]);
 
   useEffect(() => {
     let cancelled = false;
@@ -213,17 +227,6 @@ export default function App() {
     });
   }, [detail]);
 
-  const dailyWithRank = useMemo(() => {
-    const daily = (summary?.daily || []).filter((r) => !isMissing(r.metrics?.mae));
-    const sorted = [...daily].sort((a, b) => a.metrics.mae - b.metrics.mae);
-    const bestDay = sorted[0]?.delivery_day;
-    const worstDay = sorted[sorted.length - 1]?.delivery_day;
-    return (summary?.daily || []).map((row) => ({
-      ...row,
-      isBest: row.delivery_day === bestDay,
-      isWorst: row.delivery_day === worstDay,
-    }));
-  }, [summary]);
 
   const dayComparison = useMemo(() => {
     if (isMissing(dayMetrics.mae) || isMissing(overall.mae)) return null;
@@ -238,6 +241,57 @@ export default function App() {
       isBetter: maeDiff < 0,
     };
   }, [dayMetrics, overall]);
+
+  // Sorted daily data for table
+  const sortedDaily = useMemo(() => {
+    const daily = (summary?.daily || []).filter((r) => !isMissing(r.metrics?.mae));
+    const sorted = [...daily].sort((a, b) => {
+      let aVal, bVal;
+      if (tableSort.column === 'delivery_day') {
+        aVal = a.delivery_day;
+        bVal = b.delivery_day;
+      } else {
+        aVal = a.metrics[tableSort.column] ?? 0;
+        bVal = b.metrics[tableSort.column] ?? 0;
+      }
+      if (typeof aVal === 'string') {
+        return tableSort.direction === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+      }
+      return tableSort.direction === 'asc' ? aVal - bVal : bVal - aVal;
+    });
+    const bestDay = sorted[0]?.delivery_day;
+    const worstDay = sorted[sorted.length - 1]?.delivery_day;
+    return sorted.map((row) => ({
+      ...row,
+      isBest: row.delivery_day === bestDay,
+      isWorst: row.delivery_day === worstDay,
+    }));
+  }, [summary, tableSort]);
+
+  // Heatmap data: MAE by hour across all days
+  const heatmapData = useMemo(() => {
+    if (!summary?.daily) return [];
+    const hours = Array.from({ length: 24 }, (_, i) => i);
+    const days = (summary.daily || []).map(d => d.delivery_day);
+    
+    // Since we don't have hourly breakdown in daily data, create a placeholder
+    // In a real implementation, you'd fetch hourly data for each day
+    return hours.map(hour => ({
+      hour: `${String(hour).padStart(2, '0')}:00`,
+      ...days.reduce((acc, day) => {
+        const dayData = summary.daily.find(d => d.delivery_day === day);
+        acc[day] = dayData?.metrics?.mae || 0;
+        return acc;
+      }, {})
+    }));
+  }, [summary]);
+
+  const handleSort = (column) => {
+    setTableSort(prev => ({
+      column,
+      direction: prev.column === column && prev.direction === 'asc' ? 'desc' : 'asc'
+    }));
+  };
 
   const handleExport = () => {
     if (!detail?.series) return;
@@ -288,6 +342,9 @@ export default function App() {
           </p>
         </div>
         <div className="header-controls">
+          <button className="btn-theme" onClick={() => setDarkMode(!darkMode)}>
+            {darkMode ? "☀️ Light" : "🌙 Dark"}
+          </button>
           <label className="day-picker">
             Delivery day
             <select value={day} onChange={(e) => setDay(e.target.value)}>
@@ -308,8 +365,18 @@ export default function App() {
       <section className="kpis">
         <Kpi label="Decision cutoff" value={fmtTime(detail?.cutoff)} hint="D-1 09:20 London" />
         <Kpi label="Forecast used" value={fmtTime(detail?.latest_publish)} hint="Latest publish ≤ cutoff" />
-        <Kpi label="Day MAE" value={fmtMW(dayMetrics.mae)} hint="Mean absolute error" />
-        <Kpi label="Day bias" value={fmtMW(dayMetrics.bias)} hint="Positive = over-forecast" />
+        <Kpi 
+          label="Day MAE" 
+          value={fmtMW(dayMetrics.mae)} 
+          hint="Mean absolute error"
+          alert={dayMetrics.mae > alertThresholds.mae}
+        />
+        <Kpi 
+          label="Day bias" 
+          value={fmtMW(dayMetrics.bias)} 
+          hint="Positive = over-forecast"
+          alert={Math.abs(dayMetrics.bias) > alertThresholds.bias}
+        />
         <Kpi label="January MAE" value={fmtMW(overall.mae)} hint="Full-month skill" />
         <Kpi label="January nMAE" value={fmtPct(overall.nmae_pct)} hint="% of mean actual" />
         <Kpi
@@ -411,6 +478,33 @@ export default function App() {
             </div>
           </div>
         )}
+      </section>
+
+      <section className="card panel">
+        <h2>Alert thresholds</h2>
+        <p className="caption">Set thresholds to highlight when metrics exceed limits.</p>
+        <div className="threshold-control">
+          <label>
+            MAE alert threshold (MW):
+            <input
+              type="number"
+              value={alertThresholds.mae}
+              onChange={(e) => setAlertThresholds(prev => ({ ...prev, mae: Number(e.target.value) }))}
+              min="0"
+              step="500"
+            />
+          </label>
+          <label>
+            Bias alert threshold (MW):
+            <input
+              type="number"
+              value={alertThresholds.bias}
+              onChange={(e) => setAlertThresholds(prev => ({ ...prev, bias: Number(e.target.value) }))}
+              min="0"
+              step="500"
+            />
+          </label>
+        </div>
       </section>
 
       <section className="card panel">
@@ -557,7 +651,7 @@ export default function App() {
       <section className="card panel">
         <h2>Daily accuracy</h2>
         <p className="caption">
-          Click a row to inspect that delivery day. <span className="badge-best">Best</span> and{" "}
+          Click column headers to sort. Click a row to inspect that delivery day. <span className="badge-best">Best</span> and{" "}
           <span className="badge-worst">Worst</span> days highlighted.
           Data quality: {detail?.data_quality?.completeness_pct || 0}% complete (
           {detail?.data_quality?.available_periods || 0}/48 periods)
@@ -566,16 +660,28 @@ export default function App() {
           <table>
             <thead>
               <tr>
-                <th>Day</th>
-                <th>MAE</th>
-                <th>RMSE</th>
-                <th>Bias</th>
-                <th>nMAE</th>
-                <th>N</th>
+                <th onClick={() => handleSort('delivery_day')} style={{ cursor: 'pointer' }}>
+                  Day {tableSort.column === 'delivery_day' && (tableSort.direction === 'asc' ? '↑' : '↓')}
+                </th>
+                <th onClick={() => handleSort('mae')} style={{ cursor: 'pointer' }}>
+                  MAE {tableSort.column === 'mae' && (tableSort.direction === 'asc' ? '↑' : '↓')}
+                </th>
+                <th onClick={() => handleSort('rmse')} style={{ cursor: 'pointer' }}>
+                  RMSE {tableSort.column === 'rmse' && (tableSort.direction === 'asc' ? '↑' : '↓')}
+                </th>
+                <th onClick={() => handleSort('bias')} style={{ cursor: 'pointer' }}>
+                  Bias {tableSort.column === 'bias' && (tableSort.direction === 'asc' ? '↑' : '↓')}
+                </th>
+                <th onClick={() => handleSort('nmae_pct')} style={{ cursor: 'pointer' }}>
+                  nMAE {tableSort.column === 'nmae_pct' && (tableSort.direction === 'asc' ? '↑' : '↓')}
+                </th>
+                <th onClick={() => handleSort('n')} style={{ cursor: 'pointer' }}>
+                  N {tableSort.column === 'n' && (tableSort.direction === 'asc' ? '↑' : '↓')}
+                </th>
               </tr>
             </thead>
             <tbody>
-              {dailyWithRank.map((row) => (
+              {sortedDaily.map((row) => (
                 <tr
                   key={row.delivery_day}
                   className={`${row.delivery_day === day ? "selected" : ""} ${row.isBest ? "best" : ""} ${row.isWorst ? "worst" : ""}`}
@@ -606,9 +712,9 @@ export default function App() {
   );
 }
 
-function Kpi({ label, value, hint }) {
+function Kpi({ label, value, hint, alert }) {
   return (
-    <article className="card kpi">
+    <article className={`card kpi ${alert ? 'kpi-alert' : ''}`}>
       <div className="label">{label}</div>
       <div className="value">{value}</div>
       <div className="hint">{hint}</div>
