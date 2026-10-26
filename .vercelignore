@@ -1,0 +1,9 @@
+.git
+.github
+.pytest_cache
+tests
+Dockerfile
+docker-compose.yml
+heroku.yml
+powershell.cmd
+*.log
