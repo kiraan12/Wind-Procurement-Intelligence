@@ -176,3 +176,5 @@ The application has been tested against real Elexon data for January 2026:
 - The exact Elexon API documentation was not consulted during implementation; query parameters were inferred from the data structure and standard API patterns.
 - The actual gate closure time for the UK day-ahead market was not independently verified against market rules; it was taken as a given requirement.
 - The forecast horizon bucket boundaries (0–6h, 6–12h, etc.) are arbitrary but reasonable for analysis purposes.
+#   W i n d - P r o c u r e m e n t - I n t e l l i g e n c e  
+ 
