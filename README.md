@@ -1,73 +1,490 @@
-# da-wind-desk
+# Wind Procurement Intelligence
 
-Anonymous working name for a day-ahead GB wind forecast accuracy desk: how much
-national wind was forecast at gate closure versus what actually generated, so a
-UK power-purchasing team can size a buffer for forecast error.
+**Day-Ahead GB Wind Forecast Accuracy & Procurement Risk Analytics**
 
-**Live app:** _add the deployed URL here_
+Wind Procurement Intelligence is a full-stack analytics application that evaluates day-ahead Great Britain (GB) wind generation forecasts against actual generation data. It helps electricity procurement teams investigate forecast errors, identify periods of elevated forecasting risk, and estimate potential financial exposure under configurable procurement assumptions.
 
-AI tools were used to design and implement this repository (code, tests, and
-documentation). The numbers are computed from Elexon Insights data, not invented
-by the model.
+The application combines time-aware data processing, forecast evaluation metrics, interactive visualizations, and scenario-based financial analysis in a single dashboard.
 
-## Key features that stand out
+> **Project status:** Historical analytics prototype  
+> **Analysis window:** January 1–31, 2026  
+> **Geographic scope:** Great Britain  
+> **Data provider:** Elexon Insights  
+> **Backend:** Python · FastAPI  
+> **Frontend:** React · Vite · Recharts
 
-- **Business impact calculator**: Quantifies the financial cost of forecast errors in £, with scenario analysis for different wholesale prices
-- **Skill score metric**: Standard meteorological evaluation comparing forecast against naive persistence baseline
-- **Day vs month comparison**: Shows how each day's accuracy compares to the January average with visual indicators
-- **Advanced visualizations**: Error distribution histogram, cumulative error chart, best/worst day highlighting
-- **Data quality tracking**: Completeness percentages and missing period indicators
-- **OpenAPI documentation**: Professional API docs at `/docs` and `/redoc`
-- **Comprehensive testing**: 14 pytest tests covering cutoff logic, error sign, DST boundaries, and skill score computation
-- **Export functionality**: CSV export for downstream analysis
-- **Production-ready**: Health check endpoint, proper error handling, configurable assumptions
+**Live application:** Add the deployed application URL when available.
 
-## What is in this repo
+---
 
-| Path | Role |
-| --- | --- |
-| `backend/cutoff.py` | Gate-closure instant (D-1 09:20 London → UTC) and latest-forecast-before-cutoff selection |
-| `backend/elexon.py` | Elexon Insights client; one JSON cache file per delivery day |
-| `backend/pipeline.py` | Join forecast to actuals, error = forecast − actual, month metrics, business impact calculator |
-| `backend/metrics.py` | MAE, RMSE, bias, nMAE, 5th/95th percentile; NaNs become null |
-| `backend/app.py` | FastAPI: `/api/summary`, `/api/day/{date}`, `/api/meta`, `/api/refresh`, `/health`, static UI, OpenAPI docs |
-| `backend/config.py` | Single gate-closure constant, January 2026 window, business impact assumptions |
-| `frontend/` | React + Vite + Recharts single page with business impact calculator |
-| `cache/actuals/` | FUELHH WIND outturn, one file per day |
-| `cache/forecasts/` | WINDFOR publishes in the 12 hours before cutoff, one file per delivery day |
-| `tests/` | Cutoff leak-prevention, error sign, DST boundary |
-| `Dockerfile` | Multi-stage: build the UI, then serve it from Python on `$PORT` |
-| `docker-compose.yml` | `docker compose up --build` |
-| `heroku.yml` | Heroku container deploy |
+## Table of Contents
 
-## How to run
+- [Overview](#overview)
+- [Engineering Objectives](#engineering-objectives)
+- [Features](#features)
+- [System Architecture](#system-architecture)
+- [Forecast Evaluation Methodology](#forecast-evaluation-methodology)
+- [Key Performance Metrics](#key-performance-metrics)
+- [Procurement Impact Modeling](#procurement-impact-modeling)
+- [Data Sources and Assumptions](#data-sources-and-assumptions)
+- [Technology Stack](#technology-stack)
+- [Project Structure](#project-structure)
+- [API Reference](#api-reference)
+- [Getting Started](#getting-started)
+- [Docker Deployment](#docker-deployment)
+- [Testing and Validation](#testing-and-validation)
+- [Known Limitations](#known-limitations)
+- [Future Improvements](#future-improvements)
+- [Disclaimer](#disclaimer)
 
-### Docker (production-shaped)
+## Overview
 
-```bash
-docker compose up --build
+Wind generation variability introduces uncertainty into electricity procurement. When actual generation differs from the forecast available at a purchasing decision cutoff, electricity buyers may need to adjust their positions or manage additional balancing exposure.
+
+This project provides an analytical workflow for investigating that uncertainty using historical forecast and actual-generation records.
+
+The system evaluates forecasts based on information available before the delivery day, aligns forecast and actual data to settlement periods, calculates statistical performance metrics, and estimates illustrative financial impacts under user-configurable assumptions.
+
+### Questions the application addresses
+
+- How accurately did the day-ahead forecast predict GB wind generation?
+- Did the forecast systematically overestimate or underestimate generation?
+- Which delivery days and settlement periods had the largest errors?
+- How did a selected day's forecast performance compare with the monthly baseline?
+- How sensitive are estimated procurement costs to changes in electricity prices and exposure assumptions?
+- How much of the expected settlement-period data was available for analysis?
+
+The current implementation is designed for retrospective analysis of January 2026. It is a decision-support prototype, not a live forecasting service, automated trading platform, or production procurement optimizer.
+
+## Engineering Objectives
+
+The project is built around several engineering principles:
+
+- **Time-aware evaluation:** Prevent forecasts published after the decision cutoff from entering the day-ahead evaluation.
+- **Reproducible analytics:** Derive reported metrics from the underlying data and deterministic calculation logic.
+- **Data transparency:** Make missing observations, coverage limitations, and methodological assumptions visible.
+- **Separation of concerns:** Keep API orchestration, source-data access, forecast selection, metric computation, and presentation logically separated.
+- **Configurable scenarios:** Allow users to explore alternative financial assumptions without presenting modeled outputs as realized trading results.
+- **Testability:** Verify critical calculation and data-processing behavior with automated tests.
+
+AI-assisted development was used during implementation and documentation. The analytical results are produced by application logic and source data rather than generated by an AI model.
+
+## Features
+
+### 1. Forecast performance analytics
+
+- Compare forecast generation against actual generation.
+- Calculate MAE, RMSE, mean bias, and normalized MAE.
+- Identify the best- and worst-performing delivery days.
+- Compare daily performance against monthly results.
+- Visualize forecast-error distributions and cumulative error patterns.
+- Evaluate forecast performance against a persistence baseline.
+
+### 2. Procurement risk scenarios
+
+- Configure wholesale electricity price assumptions.
+- Adjust under-buy cost multipliers.
+- Model over-buy recovery at a configurable resale fraction.
+- Estimate total, under-buy, and over-buy cost components.
+- Identify settlement periods with the largest modeled financial exposure.
+
+### 3. Data quality monitoring
+
+- Measure settlement-period completeness.
+- Identify missing or invalid observations.
+- Preserve unavailable numerical results as JSON `null` where supported.
+- Cache retrieved source data to reduce unnecessary repeated downloads.
+- Expose application metadata and analytical assumptions through the API.
+
+### 4. Developer tooling
+
+- REST API built with FastAPI.
+- Interactive OpenAPI documentation.
+- CSV export for downstream analysis.
+- Health-check endpoint.
+- Automated pytest tests.
+- Docker-based application configuration.
+
+## System Architecture
+
+The application follows a frontend–backend architecture. The backend retrieves and processes energy-market data, while the frontend consumes API responses and presents the resulting analytics.
+
+<pre>
+Elexon Insights API
+        |
+        v
+Source Data Client and Cache
+        |
+        v
+Forecast Cutoff Selection
+        |
+        v
+Forecast / Actual Alignment
+        |
+        v
+Metrics and Financial Scenarios
+        |
+        v
+FastAPI REST Endpoints
+        |
+        v
+React + Vite Dashboard
+        |
+        v
+Charts, KPI Cards, Daily Analysis
+and Procurement Scenario Controls
+</pre>
+
+### Backend responsibilities
+
+The Python backend is responsible for:
+
+- Retrieving forecast and actual-generation records.
+- Applying forecast-publication cutoff rules.
+- Aligning records across time resolutions.
+- Computing forecast performance metrics.
+- Evaluating data completeness.
+- Calculating scenario-based procurement exposure.
+- Serving results through HTTP endpoints.
+
+### Frontend responsibilities
+
+The React application is responsible for:
+
+- Retrieving analytical results from the backend.
+- Displaying summary metrics and daily comparisons.
+- Rendering forecast, actual-generation, and error visualizations.
+- Providing controls for selecting dates and financial assumptions.
+- Presenting analytical results and data-quality indicators.
+
+The frontend is a presentation and interaction layer. Core analytical calculations should remain in the backend to maintain consistent results across the dashboard and API consumers.
+
+## Forecast Evaluation Methodology
+
+### Forecast error
+
+The application uses the following sign convention:
+
+\[
+e_t = \hat{y}_t-y_t
+\]
+
+Where:
+
+- \(\hat{y}_t\) is forecast wind generation.
+- \(y_t\) is actual wind generation.
+- \(e_t\) is the forecast error for settlement period \(t\).
+
+Interpretation:
+
+| Error | Interpretation |
+|---|---|
+| Positive | Generation was over-forecast. |
+| Negative | Generation was under-forecast. |
+| Zero | Forecast matched actual generation. |
+
+This convention is used consistently when interpreting forecast bias and visualizing error distributions.
+
+### Decision-cutoff logic
+
+The configured decision cutoff is **09:20 Europe/London on the calendar day before delivery**.
+
+For a delivery day \(D\), the pipeline selects the latest eligible forecast published at or before the cutoff, subject to the configured 12-hour publication lookback window.
+
+The selection process must enforce two constraints:
+
+1. The forecast publication timestamp must not exceed the decision cutoff.
+2. The selected forecast must fall within the permitted publication lookback window.
+
+Forecasts published after the cutoff are excluded to prevent look-ahead leakage.
+
+The cutoff is a project-level modeling assumption. It should be validated against the relevant procurement workflow before operational use.
+
+### Forecast and actual alignment
+
+The forecast data is hourly, while the actual-generation records use half-hourly settlement periods.
+
+The current implementation applies each hourly forecast value to the two corresponding half-hourly periods. This creates a common evaluation grid but assumes that the hourly forecast value is representative of both settlement periods.
+
+The alignment logic must also account for time zones, daylight-saving transitions, duplicated timestamps, and missing settlement periods.
+
+### Evaluation workflow
+
+1. Retrieve the relevant source records.
+2. Validate timestamps and numeric fields.
+3. Select eligible forecast publications.
+4. Normalize timestamps to the chosen time-zone convention.
+5. Align forecast and actual values to settlement periods.
+6. Identify missing and invalid observations.
+7. Calculate daily and monthly metrics.
+8. Compare forecast performance against the baseline.
+9. Apply configured financial assumptions to eligible errors.
+10. Return results to the dashboard through the API.
+
+## Key Performance Metrics
+
+| Metric | Definition | Purpose |
+|---|---|---|
+| MAE | Mean absolute error | Measures average error magnitude. |
+| RMSE | Root mean squared error | Penalizes large errors more heavily. |
+| Bias | Mean signed error | Measures systematic over- or under-forecasting. |
+| nMAE | MAE divided by a configured normalization factor | Enables scale-adjusted comparisons. |
+| P5 / P95 | Fifth and 95th percentiles of forecast errors | Describes the retrospective error distribution. |
+| Skill score | Relative MSE improvement against a baseline | Evaluates performance against a reference forecast. |
+| Completeness | Usable expected periods divided by total expected periods | Measures data coverage. |
+
+For \(N\) valid observations, the principal metrics are:
+
+**Mean Absolute Error**
+
+\[
+MAE=\frac{1}{N}\sum_{t=1}^{N}|e_t|
+\]
+
+**Root Mean Squared Error**
+
+\[
+RMSE=\sqrt{\frac{1}{N}\sum_{t=1}^{N}e_t^2}
+\]
+
+**Forecast Bias**
+
+\[
+Bias=\frac{1}{N}\sum_{t=1}^{N}e_t
+\]
+
+Positive bias indicates systematic over-forecasting under the project's sign convention.
+
+### Normalized MAE
+
+Normalized MAE depends on the denominator selected by the implementation. The normalization method should be documented alongside the metric, including its units and behavior when the denominator is zero or unavailable.
+
+### Forecast skill score
+
+The application uses the following form of the mean-squared-error skill score:
+
+\[
+Skill=1-\frac{MSE_{\text{forecast}}}{MSE_{\text{baseline}}}
+\]
+
+- Positive values indicate lower forecast MSE than the baseline.
+- Zero indicates equal MSE.
+- Negative values indicate higher forecast MSE.
+
+The baseline is based on the previous period's actual generation. Comparisons should use the same evaluation periods and valid observations for both forecast and baseline. If baseline MSE is zero or unavailable, the skill score should be treated as undefined rather than assigned an arbitrary value.
+
+### Daily versus monthly performance
+
+The dashboard compares selected-day metrics with the January evaluation period. Depending on the available data, comparisons include MAE differences, relative changes in error, bias, and visual indicators of better or worse performance.
+
+Daily and monthly comparisons should use clearly documented observation coverage and aggregation rules.
+
+## Procurement Impact Modeling
+
+The financial calculator translates forecast errors into illustrative procurement scenarios.
+
+### Configurable assumptions
+
+| Parameter | Default value |
+|---|---:|
+| Wholesale electricity price | £100/MWh |
+| Under-buy cost multiplier | 1.5× |
+| Over-buy recovery fraction | 50% of the assumed buy price |
+| Configurable wholesale price range | £50–£300/MWh |
+
+These are modeling assumptions, not verified market prices or observed imbalance costs.
+
+### Illustrative calculation
+
+For each eligible settlement period, the model estimates the volume exposure implied by the forecast error and applies the configured financial assumptions.
+
+The underlying implementation must define:
+
+- The conversion from forecast MW error to energy exposure in MWh.
+- The treatment of half-hourly settlement duration.
+- Which error direction corresponds to under-buying or over-buying.
+- The applicable price and cost multiplier for each scenario.
+- How period-level costs are aggregated into daily and monthly totals.
+
+A simplified scenario model may express estimated exposure as:
+
+\[
+Cost_t=VolumeExposure_t\times AssumedCostRate_t
+\]
+
+The exact calculation should follow the implemented procurement logic and must not be interpreted as an authoritative market-settlement formula.
+
+### Outputs
+
+The calculator can present:
+
+- Estimated total scenario cost.
+- Estimated under-buy cost.
+- Estimated over-buy cost or recovery.
+- Highest modeled cost for an individual settlement period.
+- Changes in modeled exposure under alternative price assumptions.
+
+**Financial interpretation:** These outputs are hypothetical scenario estimates. They do not represent realized losses, guaranteed savings, or actual imbalance settlement charges. Real procurement exposure depends on portfolio position, contractual arrangements, market prices, settlement rules, and trading strategy.
+
+## Data Sources and Assumptions
+
+### Source data
+
+| Item | Description |
+|---|---|
+| Data provider | Elexon Insights |
+| Geographic coverage | Great Britain |
+| Forecast stream | WINDFOR |
+| Actual-generation records | FUELHH wind outturn records |
+| Analysis window | January 2026 |
+| Forecast resolution | Hourly |
+| Actual resolution | Half-hourly settlement periods |
+
+The source stream names and query parameters should be verified against the current Elexon API documentation and the actual requests made by the application.
+
+### Publication timestamps and time zones
+
+The decision cutoff is defined in `Europe/London` local time. Timestamp comparisons should use timezone-aware values and consistent conversion rules.
+
+Daylight-saving transitions must be handled explicitly. Local timestamps alone may be ambiguous during clock changes, so UTC timestamps or timezone-aware datetime values should be used wherever possible.
+
+### Missing data and completeness
+
+Missing or invalid numeric values should not be silently converted to zero. Where supported, unavailable metric values are returned as JSON `null`.
+
+Completeness should be calculated against the expected settlement-period count for the relevant delivery day, with the treatment of duplicated records and invalid observations documented.
+
+A missing observation is a data-quality condition, not evidence that generation was zero.
+
+### Retrospective error percentiles
+
+The displayed P5–P95 error range is calculated across the January evaluation sample.
+
+Because it uses observations from the entire month, this range contains information that would not have been available at the beginning of the month. It is appropriate for retrospective descriptive analysis, but not as a real-time uncertainty estimate.
+
+## Technology Stack
+
+| Layer | Technology | Responsibility |
+|---|---|---|
+| Backend | Python, FastAPI | API and application orchestration |
+| Data processing | Pandas, NumPy | Tabular processing and numerical calculations, where used |
+| Frontend | React, Vite | Dashboard and client-side interactions |
+| Visualization | Recharts | Interactive analytical charts |
+| API contract | OpenAPI | Endpoint schemas and interactive documentation |
+| Testing | pytest | Automated backend verification |
+| Data source | Elexon Insights | Forecast and actual-generation records |
+| Containerization | Docker, Docker Compose | Container-based development and deployment |
+| Deployment configuration | Heroku container workflow | Platform-specific deployment, if still supported by the repository |
+
+The final dependency list and supported deployment targets should be confirmed against the current source tree and configuration files.
+
+## Project Structure
+
+The following is the intended logical structure. Confirm actual filenames and deployment artifacts against the repository before relying on this tree.
+
+```text
+Wind-Procurement-Intelligence/
+├── backend/
+│   ├── app.py              # FastAPI application and route definitions
+│   ├── config.py           # Analysis configuration and assumptions
+│   ├── cutoff.py           # Forecast publication cutoff logic
+│   ├── elexon.py           # Source API client and data caching
+│   ├── metrics.py          # Forecast evaluation metrics
+│   ├── pipeline.py         # Data alignment and analysis orchestration
+│   └── requirements.txt    # Python dependencies
+├── frontend/
+│   ├── src/                # React application
+│   ├── package.json        # Frontend scripts and dependencies
+│   └── vite.config.*       # Vite development-server configuration
+├── cache/
+│   ├── actuals/            # Cached actual-generation records
+│   └── forecasts/          # Cached forecast records
+├── tests/                  # Automated tests
+├── Dockerfile
+├── docker-compose.yml
+├── heroku.yml
+└── README.md
 ```
 
-Open http://localhost:8000
+## API Reference
 
-API documentation is available at http://localhost:8000/docs (Swagger UI) and http://localhost:8000/redoc (ReDoc).
+FastAPI exposes interactive API documentation when the backend is running.
 
-### Development
+| Endpoint | Purpose |
+|---|---|
+| `GET /api/summary` | Retrieve monthly summary metrics. |
+| `GET /api/day/{date}` | Retrieve metrics and analysis for a delivery date. |
+| `GET /api/meta` | Retrieve application metadata and analytical assumptions. |
+| `POST /api/refresh` | Refresh source data or cached records. |
+| `GET /health` | Check application health. |
+
+The table describes the expected interface. Verify route availability, parameters, response schemas, and HTTP status codes against the running application.
+
+### Interactive documentation
+
+| Resource | Local URL |
+|---|---|
+| API base URL | `http://localhost:8000` |
+| Swagger UI | `http://localhost:8000/docs` |
+| ReDoc | `http://localhost:8000/redoc` |
+| OpenAPI schema | `http://localhost:8000/openapi.json` |
+
+CSV export is also available where implemented by the current backend.
+
+## Getting Started
+
+### Prerequisites
+
+Install:
+
+- Python compatible with `backend/requirements.txt`.
+- Node.js and npm compatible with the frontend dependencies.
+- Git.
+- Docker and Docker Compose, if using the containerized workflow.
+
+### 1. Clone the repository
+
+```bash
+git clone https://github.com/kiraan12/Wind-Procurement-Intelligence.git
+cd Wind-Procurement-Intelligence
+```
+
+### 2. Install backend dependencies
+
+From the repository root:
 
 ```bash
 python -m pip install -r backend/requirements.txt
+```
+
+For a clean development environment, create and activate a virtual environment before installing dependencies.
+
+### 3. Run the automated tests
+
+```bash
 python -m pytest
 ```
 
-First API request (or `POST /api/refresh`) fills `cache/` from Elexon if files
-are missing. Then:
+The test suite should complete successfully before changes are considered verified. See [Testing and Validation](#testing-and-validation) for the critical behaviors to check.
+
+### 4. Start the backend
+
+From the repository root:
+
+```bash
+python -m uvicorn backend.app:app --reload --port 8000
+```
+
+This command assumes `backend` can be imported as a Python package. If the current repository uses a different import layout, run Uvicorn from the backend directory instead:
 
 ```bash
 cd backend
 python -m uvicorn app:app --reload --port 8000
 ```
 
-In another terminal:
+### 5. Start the frontend
+
+Open a second terminal:
 
 ```bash
 cd frontend
@@ -75,106 +492,126 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:5173 (Vite proxies `/api` to port 8000).
+Open `http://localhost:5173`.
 
-### Heroku container
+Confirm that the Vite configuration forwards API requests to the backend at `http://localhost:8000`. If the proxy is not configured, use the appropriate frontend environment variable or API configuration supported by the project.
+
+### 6. Initialize the data
+
+Depending on the implementation, the first relevant API request or `POST /api/refresh` may retrieve missing records from Elexon Insights and cache them locally.
+
+Data initialization requires network access to the source API and valid source-query parameters. Verify that retrieval succeeds before interpreting dashboard results.
+
+## Docker Deployment
+
+The repository includes Docker configuration intended to support containerized execution.
+
+From the repository root:
 
 ```bash
-heroku stack:set container
-heroku container:push web
-heroku container:release web
+docker compose up --build
 ```
 
-The process listens on `$PORT`. Cached JSON is copied into the image so the app
-can start without calling Elexon.
+Stop the containers with:
 
-## Key assumptions
+```bash
+docker compose down
+```
 
-- **Gate closure** is 09:20 Europe/London on the calendar day before delivery.
-  That is one constant in `backend/config.py`.
-- Scope is **national GB wind**, **Elexon only**, **January 2026 delivery days**.
-- Forecasts used for day D are those **published in the 12 hours ending at
-  cutoff**, and only the latest publish with `publishTime <= cutoff` is kept.
-  Later publishes are never used.
-- **error = forecast − actual**. Positive error is an over-forecast, so the
-  buyer risks under-buying the residual after wind.
-- WINDFOR is hourly. The hour's MW figure is applied to **both 30-minute
-  settlement periods** in that hour when joining to FUELHH.
-- The shaded **90% error band** uses 5th and 95th percentile errors from the
-  **full January sample**. That is slightly optimistic for early days in the
-  month, which would not yet have seen later errors.
-- Missing or NaN values are returned as JSON `null`.
+The application is expected to expose its configured service port. Confirm the actual port mappings in `docker-compose.yml` before accessing the application.
 
-## Business impact calculator
+Before using this configuration in a public environment, verify:
 
-The app includes a business impact calculator that estimates the financial cost of forecast errors:
+- Frontend build and serving behavior.
+- Backend startup and health checks.
+- Runtime configuration and environment variables.
+- Cache persistence and write permissions.
+- Error handling for unavailable upstream data.
+- Production server settings and container security.
 
-- **Total cost impact**: Combined cost of under-buying and over-buying
-- **Under-buy cost**: Cost when forecast overestimates wind (need to buy at spot price with balancing penalty)
-- **Over-buy cost**: Cost when forecast underestimates wind (sell excess at lower price)
-- **Worst single period**: Maximum cost in any 30-minute settlement period
+A successful local container build does not, by itself, establish production readiness.
 
-The calculator uses configurable assumptions:
-- Wholesale power price (default £100/MWh, adjustable £50-£300/MWh)
-- Balancing mechanism penalty multiplier (1.5x for under-buy)
-- Sell price assumption (50% of buy price for over-buy)
+## Testing and Validation
 
-Users can adjust the wholesale price to see how different market conditions affect the cost impact of forecast errors.
+The project includes pytest coverage intended to verify critical analysis behavior.
 
-## Advanced analytics
+Key test areas include:
 
-### Skill score
-The app computes a forecast skill score that compares the WINDFOR forecast against a naive persistence baseline (previous period's actual):
+- Forecast selection at the configured publication cutoff.
+- Rejection of forecasts published after the cutoff.
+- Forecast-error sign convention.
+- Daylight-saving time boundaries.
+- Missing-value handling.
+- Skill-score computation.
+- Data alignment across forecast and actual settlement periods.
 
-- **Skill score = 1 - (MSE_forecast / MSE_persistence)**
-- Positive score means forecast is better than persistence
-- Negative score means forecast is worse than persistence
-- This is a standard meteorological forecast evaluation metric
+The original implementation notes report 14 passing tests and cached forecast and actual data covering 31 January delivery days. These results should be reproduced against the current repository before being presented as verified.
 
-### Day vs month comparison
-Shows how the selected day's accuracy compares to the January average:
-- MAE difference (absolute and percentage)
-- Bias difference
-- Visual indicators (green for better, red for worse)
+### Recommended validation checks
 
-### Error distribution and cumulative error
-- **Error distribution histogram**: Shows the distribution of forecast errors in 10 bins
-- **Cumulative error chart**: Running sum of errors throughout the day, showing bias accumulation
+Before operational use, validate:
 
-### Data quality indicators
-- Data completeness percentage (e.g., 100% complete, 48/48 periods)
-- Tracks missing periods for each day
+1. Source API parameters and returned schema.
+2. Forecast publication timestamps and cutoff eligibility.
+3. Time-zone conversion and daylight-saving behavior.
+4. Expected versus observed settlement-period counts.
+5. Duplicate and missing record handling.
+6. Metric calculations against independently calculated examples.
+7. Financial scenario formulas, units, and sign conventions.
+8. API behavior when the upstream source is unavailable.
 
-### Best/worst day highlighting
-The daily accuracy table highlights:
-- Best day (lowest MAE) in green
-- Worst day (highest MAE) in orange
-- Visual badges for quick identification
+## Known Limitations
 
-## Verification and assumptions
+- The current analysis is restricted to January 2026.
+- The configured decision cutoff is a project assumption and has not been established here as an industry-wide procurement rule.
+- Hourly forecasts are mapped to half-hourly periods using a simplifying alignment assumption.
+- Full-month percentile bands are retrospective and are not suitable as leakage-free historical uncertainty estimates.
+- Procurement costs are modeled from configurable assumptions rather than calibrated against a verified buyer's portfolio and realized imbalance prices.
+- Cache persistence and data-refresh behavior depend on the execution environment.
+- The available test results and API behavior require independent reproduction against the current repository.
 
-The application has been tested against real Elexon data for January 2026:
+These limitations define the boundary between a useful analytical prototype and an operational procurement decision system.
 
-- **Wind generation values**: Actuals range from ~2,000 MW to ~18,000 MW, which is within the expected range for GB national wind capacity.
-- **Forecast errors**: MAE of ~2,145 MW and RMSE of ~2,616 MW across the month, with individual half-hour errors ranging from -1,105 MW (5th percentile) to +5,341 MW (95th percentile). These are in the expected hundreds-to-low-thousands MW range.
-- **Cutoff logic**: All 14 pytest tests pass, verifying that:
-  - Only forecasts published at or before the cutoff are used
-  - Forecasts published after the cutoff are never selected
-  - The cutoff correctly handles daylight-saving time boundaries (spring-forward and autumn-back)
-  - Error sign is correct (positive = over-forecast)
-  - Missing values return null
-  - Skill score computation works correctly (positive when better than persistence)
+## Future Improvements
 
-**Assumptions made:**
-1. The Elexon API query parameters (`settlementDateFrom/To` for FUELHH and `publishDateTimeFrom/To` for WINDFOR) are correct based on the API documentation. These were not verified against live API docs but work with the actual data.
-2. The 12-hour lookback window for forecasts is a reasonable approximation of what would be available at decision time. In practice, the desk might have access to a different window.
-3. The 90% error band computed on the full January sample is slightly optimistic for early January days, as noted in the assumptions. This is a known limitation.
-4. The gate closure time of 09:20 London is configurable but assumed to be correct for the UK day-ahead market.
-5. The app caches all API responses as JSON on disk, so it works offline after the initial data fetch. This was verified by checking the cache directory contains 31 actuals files and 31 forecast files.
+### Data engineering
 
-**What could not be verified:**
-- The exact Elexon API documentation was not consulted during implementation; query parameters were inferred from the data structure and standard API patterns.
-- The actual gate closure time for the UK day-ahead market was not independently verified against market rules; it was taken as a given requirement.
-- The forecast horizon bucket boundaries (0–6h, 6–12h, etc.) are arbitrary but reasonable for analysis purposes.
-#   W i n d - P r o c u r e m e n t - I n t e l l i g e n c e  
- 
+- Support configurable date ranges and multi-month analysis.
+- Introduce explicit source-schema validation.
+- Add robust retry, timeout, and upstream error handling.
+- Track cache freshness and data provenance.
+- Validate record uniqueness and settlement-period coverage.
+
+### Forecast evaluation
+
+- Compare multiple forecast publication vintages.
+- Add rolling-origin evaluation to prevent temporal leakage.
+- Evaluate uncertainty intervals using only information available at each decision cutoff.
+- Document and test the normalization used for nMAE.
+- Expand baseline comparisons and missing-data sensitivity analysis.
+
+### Procurement analytics
+
+- Incorporate verified historical imbalance and market-price data.
+- Separate forecast error from actual portfolio exposure.
+- Make energy-volume conversions and settlement assumptions explicit.
+- Support configurable procurement strategies and sensitivity analysis.
+- Validate modeled financial outputs against independently calculated scenarios.
+
+### Production readiness
+
+- Add structured logging and operational monitoring.
+- Introduce automated data-refresh scheduling.
+- Add API integration tests and frontend error-state tests.
+- Establish reproducible dependency and deployment configurations.
+- Add deployment health checks and documented environment configuration.
+
+## Disclaimer
+
+Wind Procurement Intelligence is a historical analytics and decision-support prototype. Its results depend on source-data quality, forecast selection rules, time alignment, metric definitions, and configurable financial assumptions.
+
+Modeled financial exposure is not realized profit or loss, guaranteed savings, or trading advice. Forecast performance on historical data does not guarantee future accuracy.
+
+---
+
+**Built with Python, FastAPI, React, Vite, Recharts, and Elexon Insights data.**
